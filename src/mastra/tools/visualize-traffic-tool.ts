@@ -2,7 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { MCPClient } from "@mastra/mcp";
 import "dotenv/config";
-import { buildTrafficPrompt, getDelayBucket } from "./prompt-tables";
+import { buildTrafficPrompt, buildMotionPrompt, getDelayBucket, getMotionDuration } from "./prompt-tables";
 import { getCachedVisualization, setCachedVisualization } from "./visualize-traffic-cache";
 
 // FR-VIS-02/FR-VIS-03 (TDD §7.1): render is gated behind a live pre-flight cost
@@ -16,6 +16,19 @@ const IMAGE_ASPECT_RATIO = "1:1";
 // flux-schnell's "1:1" default (square_hd, ~1024x1024) is ~1 megapixel; used only
 // to turn the live per-megapixel rate into a pre-flight USD estimate.
 const ESTIMATED_IMAGE_MEGAPIXELS = 1;
+
+// FR-VIS-05 (TDD §7.2): fixed animate model, same "one deterministic style"
+// rationale as the image model — only the motion prompt/duration vary by status.
+const ANIMATE_MODEL = "pixverse-i2v";
+// Confirmed live: action="animate" is auto-async (a synchronous call risks
+// hanging past pixverse-i2v's own measured p95 of ~57s), so this polls
+// get_create_media instead. Interval/budget give headroom over that p95.
+const ANIMATE_POLL_INTERVAL_MS = 4000;
+const ANIMATE_POLL_TIMEOUT_MS = 90000;
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 // One client for the process lifetime — MCPClient caches the underlying transport
 // per its own id, so repeated getTools() calls within a run don't reconnect.
@@ -133,13 +146,96 @@ export const visualizeTrafficTool = createTool({
         }
 
         const renderedCost = render.cost_paid_usd ?? render.cost_usd_estimated ?? estimatedCost;
-        await setCachedVisualization({ ...cacheKey, imageUrl: render.url, renderedCost });
+
+        // FR-VIS-05: optional cinemagraph, gated by its own pre-flight estimate
+        // (a new render path gets its own gate — the still-image gate above
+        // doesn't cover it). Any failure here falls back to the still image
+        // (FR-VIS-06) rather than failing the whole request.
+        let videoUrl: string | undefined;
+        let totalEstimatedCost = estimatedCost;
+        let totalRenderedCost = renderedCost;
+        let skippedReason: string | undefined;
+
+        if (input.animate) {
+            try {
+                const getCreateMedia = tools["livepeer_get_create_media"];
+                if (!getCreateMedia) {
+                    throw new Error("livepeer_get_create_media tool not available");
+                }
+
+                const motionPrompt = buildMotionPrompt({ status: trafficResult.status });
+                const duration = getMotionDuration({ status: trafficResult.status });
+
+                const animatePricing = extractResult(await getPricing.execute({ name: ANIMATE_MODEL }));
+                const pricePerSecond = animatePricing?.capabilities?.find((c: any) => c.name === ANIMATE_MODEL)?.display_price_usd;
+                if (typeof pricePerSecond !== "number") {
+                    throw new Error(`could not resolve live pricing for capability "${ANIMATE_MODEL}"`);
+                }
+
+                const animateEstimatedCost = pricePerSecond * duration;
+                totalEstimatedCost += animateEstimatedCost;
+                console.log(`[visualize-traffic] cinemagraph estimated cost: $${animateEstimatedCost.toFixed(5)} (threshold $${MAX_RENDER_COST_USD}, ${duration}s @ $${pricePerSecond}/s)`);
+
+                if (animateEstimatedCost > MAX_RENDER_COST_USD) {
+                    skippedReason = `Cinemagraph skipped: estimated cost $${animateEstimatedCost.toFixed(5)} exceeds MAX_RENDER_COST_USD $${MAX_RENDER_COST_USD}`;
+                } else {
+                    console.log(`[visualize-traffic] cinemagraph motion prompt: "${motionPrompt}" (${duration}s)`);
+
+                    const submitted = extractResult(
+                        await createMedia.execute({
+                            action: "animate",
+                            source_url: render.url,
+                            prompt: motionPrompt,
+                            model_override: ANIMATE_MODEL,
+                            duration,
+                            async: true,
+                            max_cost_usd: MAX_RENDER_COST_USD,
+                        })
+                    );
+
+                    const jobId = submitted?.job_id;
+                    if (!jobId) {
+                        throw new Error(`no job_id returned: ${JSON.stringify(submitted)}`);
+                    }
+
+                    const deadline = Date.now() + ANIMATE_POLL_TIMEOUT_MS;
+                    let jobResult: any = null;
+                    while (Date.now() < deadline) {
+                        await sleep(ANIMATE_POLL_INTERVAL_MS);
+                        const poll = extractResult(await getCreateMedia.execute({ job_id: jobId }));
+                        if (poll?.status === "done") {
+                            jobResult = poll;
+                            break;
+                        }
+                        if (poll?.status === "failed") {
+                            throw new Error(`cinemagraph job failed: ${poll?.error ?? JSON.stringify(poll)}`);
+                        }
+                    }
+
+                    if (!jobResult?.url) {
+                        throw new Error(`timed out waiting for cinemagraph job ${jobId}`);
+                    }
+
+                    videoUrl = jobResult.url;
+                    const animateRenderedCost = jobResult.cost_paid_usd ?? jobResult.cost_usd_estimated ?? animateEstimatedCost;
+                    totalRenderedCost += animateRenderedCost;
+                    console.log(`[visualize-traffic] cinemagraph done: ${videoUrl}`);
+                }
+            } catch (err: any) {
+                skippedReason = `Cinemagraph skipped: ${err?.message ?? String(err)}`;
+                console.log(`[visualize-traffic] ${skippedReason}`);
+            }
+        }
+
+        await setCachedVisualization({ ...cacheKey, imageUrl: render.url, videoUrl, renderedCost: totalRenderedCost });
 
         return {
             imageUrl: render.url,
+            videoUrl,
             cached: false,
-            estimatedCost,
-            renderedCost,
+            estimatedCost: totalEstimatedCost,
+            renderedCost: totalRenderedCost,
+            skippedReason,
         };
     },
 });

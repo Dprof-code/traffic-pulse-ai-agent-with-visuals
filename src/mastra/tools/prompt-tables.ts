@@ -35,3 +35,27 @@ export function buildTrafficPrompt(input: { status: TrafficStatus; delayMinutes:
 
     return `${TIME_OF_DAY} aerial view of an ${ROAD_TYPE} highway, ${statusAdjective} traffic, ${delayDescriptor}, photorealistic`;
 }
+
+// Cinemagraph motion parameters (FR-VIS-05, TDD §7.2). The animate model's own
+// schema (confirmed live via describe_capability) takes `prompt` as a motion
+// descriptor for the clip — not the still-image subject — plus `duration` in
+// seconds. Keyed on status only, matching the TDD §7.2 table exactly.
+const MOTION_DESCRIPTORS: Record<TrafficStatus, string> = {
+    "Light traffic": "slow, smooth camera drift, gentle continuous motion",
+    "Moderate traffic": "moderate motion with a mild stutter, vehicles inching forward",
+    "Heavy traffic": "dense, congested motion, vehicles clustered and barely moving",
+};
+
+const MOTION_DURATIONS: Record<TrafficStatus, number> = {
+    "Light traffic": 4,
+    "Moderate traffic": 6,
+    "Heavy traffic": 8,
+};
+
+export function buildMotionPrompt(input: { status: TrafficStatus }): string {
+    return MOTION_DESCRIPTORS[input.status];
+}
+
+export function getMotionDuration(input: { status: TrafficStatus }): number {
+    return MOTION_DURATIONS[input.status];
+}
