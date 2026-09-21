@@ -15,9 +15,10 @@
   "license": "ISC",
   "type": "module",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.13.0"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
     "@mastra/core": "1.67.0",
     "@mastra/evals": "1.10.2",
     "@mastra/libsql": "1.23.0",

@@ -2,7 +2,8 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { MCPClient } from "@mastra/mcp";
 import "dotenv/config";
-import { buildTrafficPrompt } from "./prompt-tables";
+import { buildTrafficPrompt, getDelayBucket } from "./prompt-tables";
+import { getCachedVisualization, setCachedVisualization } from "./visualize-traffic-cache";
 
 // FR-VIS-02/FR-VIS-03 (TDD §7.1): render is gated behind a live pre-flight cost
 // estimate checked against this ceiling before any paid MCP call fires.
@@ -62,7 +63,23 @@ export const visualizeTrafficTool = createTool({
     }),
     execute: async (ctx: any) => {
         const input = ctx.context ?? ctx.inputData ?? ctx;
-        const { trafficResult } = input;
+        const { origin, destination, trafficResult } = input;
+
+        // FR-VIS-04: cache check before any MCP call.
+        const delayBucket = getDelayBucket(trafficResult.delayMinutes);
+        const cacheKey = { origin, destination, status: trafficResult.status, delayBucket };
+        const cached = await getCachedVisualization(cacheKey);
+        if (cached) {
+            console.log(`[visualize-traffic] cache hit for (${origin}, ${destination}, ${trafficResult.status}, ${delayBucket})`);
+            return {
+                imageUrl: cached.imageUrl,
+                videoUrl: cached.videoUrl,
+                cached: true,
+                estimatedCost: 0,
+                renderedCost: cached.renderedCost,
+            };
+        }
+        console.log(`[visualize-traffic] cache miss for (${origin}, ${destination}, ${trafficResult.status}, ${delayBucket})`);
 
         const prompt = buildTrafficPrompt({
             status: trafficResult.status,
@@ -115,11 +132,14 @@ export const visualizeTrafficTool = createTool({
             throw new Error(`Livepeer render did not return an image URL: ${JSON.stringify(render)}`);
         }
 
+        const renderedCost = render.cost_paid_usd ?? render.cost_usd_estimated ?? estimatedCost;
+        await setCachedVisualization({ ...cacheKey, imageUrl: render.url, renderedCost });
+
         return {
             imageUrl: render.url,
             cached: false,
             estimatedCost,
-            renderedCost: render.cost_paid_usd ?? render.cost_usd_estimated ?? estimatedCost,
+            renderedCost,
         };
     },
 });
