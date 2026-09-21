@@ -1,7 +1,8 @@
 
 import { Mastra } from '@mastra/core/mastra';
+import { InMemoryStore } from '@mastra/core/storage';
 import { PinoLogger } from '@mastra/loggers';
-import { LibSQLStore } from '@mastra/libsql';
+import { Observability, MastraStorageExporter } from '@mastra/observability';
 
 import { trafficAgent } from './agents/traffic-agent';
 import { a2aAgentRoute } from './routes/a2a-agent-route';
@@ -12,11 +13,12 @@ export const mastra = new Mastra({
   workflows: { trafficWorkflow },
   agents: { trafficAgent },
   scorers: { toolCallAppropriatenessScorer, completenessScorer, translationScorer },
-  storage: new LibSQLStore({
-    id: "mastra-core-storage",
-    // stores observability, scores, ... into memory storage, if it needs to persist, change to file:../mastra.db
-    url: ":memory:",
-  }),
+  // In-memory storage adapter — unlike LibSQLStore's observability domain,
+  // this one fully implements feedback (create/list), which the Studio UI's
+  // Feedback panel calls. Non-persistent by design, matching the original
+  // ":memory:" intent (see traffic-agent.ts for the persistent LibSQLStore
+  // used for actual conversation memory).
+  storage: new InMemoryStore(),
   logger: new PinoLogger({
     name: 'Mastra',
     level: 'info',
@@ -25,10 +27,11 @@ export const mastra = new Mastra({
     // Telemetry is deprecated and will be removed in the Nov 4th release
     enabled: false,
   },
-  observability: {
-    // Enables DefaultExporter and CloudExporter for AI tracing
-    default: { enabled: true },
-  },
+  observability: new Observability({
+    configs: {
+      default: { serviceName: 'mastra', exporters: [new MastraStorageExporter()] },
+    },
+  }),
   server: {
     build: {
       openAPIDocs: true,
