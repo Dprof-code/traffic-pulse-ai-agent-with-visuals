@@ -27,19 +27,13 @@ const livepeerMcp = new MCPClient({
     },
 });
 
-// MCP tool results arrive as { content: [...], structuredContent?: {...} };
-// Livepeer's tools populate structuredContent, but fall back to parsing the
-// text part in case a given tool only returns content.
+// @mastra/mcp@1.x's wrapped tool.execute() already returns the unwrapped
+// structuredContent object directly (the raw MCP content array is attached as
+// a hidden, non-enumerable property). structuredContent is checked first only
+// as defensive back-compat in case a tool result ever arrives in the older
+// { content, structuredContent } envelope shape instead.
 function extractResult(mcpResult: any): any {
     if (mcpResult?.structuredContent) return mcpResult.structuredContent;
-    const text = mcpResult?.content?.[0]?.text;
-    if (typeof text === "string") {
-        try {
-            return JSON.parse(text);
-        } catch {
-            return text;
-        }
-    }
     return mcpResult;
 }
 
@@ -76,7 +70,7 @@ export const visualizeTrafficTool = createTool({
         });
         console.log(`[visualize-traffic] prompt: "${prompt}"`);
 
-        const tools = await livepeerMcp.getTools();
+        const tools = await livepeerMcp.listTools();
         const getPricing = tools["livepeer_get_pricing"];
         const createMedia = tools["livepeer_create_media"];
         if (!getPricing || !createMedia) {
@@ -85,7 +79,7 @@ export const visualizeTrafficTool = createTool({
 
         // FR-VIS-02: pre-flight estimate, checked before any paid call.
         const pricing = extractResult(
-            await getPricing.execute({ context: { name: IMAGE_MODEL } })
+            await getPricing.execute({ name: IMAGE_MODEL })
         );
         const priceRow = pricing?.capabilities?.find((c: any) => c.name === IMAGE_MODEL);
         const pricePerMegapixel = priceRow?.display_price_usd;
@@ -108,14 +102,12 @@ export const visualizeTrafficTool = createTool({
         // server-side belt-and-suspenders gate on top of the check above.
         const render = extractResult(
             await createMedia.execute({
-                context: {
-                    action: "generate",
-                    prompt,
-                    model_override: IMAGE_MODEL,
-                    aspect_ratio: IMAGE_ASPECT_RATIO,
-                    max_cost_usd: MAX_RENDER_COST_USD,
-                    async: false,
-                },
+                action: "generate",
+                prompt,
+                model_override: IMAGE_MODEL,
+                aspect_ratio: IMAGE_ASPECT_RATIO,
+                max_cost_usd: MAX_RENDER_COST_USD,
+                async: false,
             })
         );
 

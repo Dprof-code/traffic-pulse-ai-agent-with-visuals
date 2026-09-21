@@ -13,6 +13,7 @@ export const mastra = new Mastra({
   agents: { trafficAgent },
   scorers: { toolCallAppropriatenessScorer, completenessScorer, translationScorer },
   storage: new LibSQLStore({
+    id: "mastra-core-storage",
     // stores observability, scores, ... into memory storage, if it needs to persist, change to file:../mastra.db
     url: ":memory:",
   }),

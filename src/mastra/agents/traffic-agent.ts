@@ -26,10 +26,11 @@ export const trafficAgent = new Agent({
     - If it returns an imageUrl, share that URL with the user
     Do not call visualizeTrafficTool unless a visual was explicitly requested.
     `,
-    model: "google/gemini-2.5-flash",
+    model: "google/gemini-3.6-flash",
     tools: { trafficTool, visualizeTrafficTool },
     memory: new Memory({
         storage: new LibSQLStore({
+            id: "traffic-agent-memory",
             url: "file:../mastra.db",
         })
     })
