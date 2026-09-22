@@ -58,7 +58,21 @@ export const a2aAgentRoute = registerApiRoute('/a2a/agent/:agentId', {
 
             // Execute agent
             const response = await agent.generate(mastraMessages);
-            const agentText = response.text || '';
+            let agentText = response.text || '';
+
+            // The model doesn't reliably follow formatting instructions for
+            // embedding media, so guarantee it here from the tool's actual
+            // output instead of trusting the model's own phrasing. No-op for
+            // requests that never call visualizeTrafficTool (FR-VIS-07).
+            const visualResult = (response.toolResults as any[] | undefined)
+                ?.find((r) => r?.payload?.toolName === 'visualizeTrafficTool')
+                ?.payload?.result;
+            if (visualResult?.imageUrl) {
+                agentText += `\n\nImage: ${visualResult.imageUrl}`;
+            }
+            if (visualResult?.videoUrl) {
+                agentText += `\n\nVideo: ${visualResult.videoUrl}`;
+            }
 
             // Build artifacts array
             const artifacts = [
