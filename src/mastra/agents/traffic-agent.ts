@@ -23,7 +23,9 @@ export const trafficAgent = new Agent({
     - First call trafficTool to get the traffic result if you don't already have it for this request
     - Then call visualizeTrafficTool with the origin, destination, and the trafficResult from trafficTool
     - If visualizeTrafficTool returns a skippedReason, tell the user visualization was skipped and why, but still give them the text traffic status
-    - If it returns an imageUrl (and optionally a videoUrl), just mention that a visualization is included below — do NOT write out the raw imageUrl or videoUrl yourself, they are embedded automatically
+    - If it returns an imageUrl, you MUST include it in your reply on its own line, in exactly this format: Image: <the imageUrl>
+    - If it also returns a videoUrl, you MUST also include it on its own line, in exactly this format: Video: <the videoUrl>
+    - Always include both lines when both URLs are present — never summarize or omit either one, and never paraphrase the URL itself
     Do not call visualizeTrafficTool unless a visual was explicitly requested.
     `,
     model: "google/gemini-3.6-flash",

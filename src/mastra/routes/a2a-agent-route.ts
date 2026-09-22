@@ -60,17 +60,21 @@ export const a2aAgentRoute = registerApiRoute('/a2a/agent/:agentId', {
             const response = await agent.generate(mastraMessages);
             let agentText = response.text || '';
 
-            // The model doesn't reliably follow formatting instructions for
-            // embedding media, so guarantee it here from the tool's actual
-            // output instead of trusting the model's own phrasing. No-op for
-            // requests that never call visualizeTrafficTool (FR-VIS-07).
+            // The model doesn't always follow formatting instructions for
+            // embedding media (it's instructed to write these URLs itself so
+            // that Mastra Studio's own chat -- which calls the agent directly,
+            // bypassing this route -- shows them too). Guarantee it here from
+            // the tool's actual output as a fallback, but only if the model's
+            // own text doesn't already include the URL, to avoid duplicating
+            // it. No-op for requests that never call visualizeTrafficTool
+            // (FR-VIS-07).
             const visualResult = (response.toolResults as any[] | undefined)
                 ?.find((r) => r?.payload?.toolName === 'visualizeTrafficTool')
                 ?.payload?.result;
-            if (visualResult?.imageUrl) {
+            if (visualResult?.imageUrl && !agentText.includes(visualResult.imageUrl)) {
                 agentText += `\n\nImage: ${visualResult.imageUrl}`;
             }
-            if (visualResult?.videoUrl) {
+            if (visualResult?.videoUrl && !agentText.includes(visualResult.videoUrl)) {
                 agentText += `\n\nVideo: ${visualResult.videoUrl}`;
             }
 
