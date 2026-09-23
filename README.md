@@ -2,12 +2,16 @@
 
 ## Overview
 
-This Node.js backend service leverages the Mastra AI framework to provide intelligent traffic monitoring through AI-powered agents. Built with modern AI technologies, it offers real-time traffic updates through a scalable RESTful API with Agent-to-Agent (A2A) communication protocol support.
+This Node.js backend service leverages the Mastra AI framework to provide intelligent traffic monitoring through AI-powered agents. Built with modern AI technologies, it offers real-time traffic updates through a scalable RESTful API with Agent-to-Agent (A2A) communication protocol support — and, on request, an AI-generated image (with an optional short cinemagraph) of the current traffic condition.
 
 ## Features
 
 - **Mastra AI Framework**: Built on a robust AI agent framework with support for workflows, tools, and agent orchestration.
 - **Traffic Monitoring Agent**: Provides real-time traffic updates using Google Routes API with traffic-aware routing, delay calculations, and status reporting.
+- **Traffic Visualization (Livepeer Agent MCP)**: On explicit request, generates a photorealistic image — and optionally a short animated cinemagraph — of the current traffic condition via the [Livepeer Agent MCP](https://agent.livepeer.org/api/mcp/creative). Prompts are built from fixed status/delay lookup tables (not freeform LLM text) for deterministic, cacheable output.
+- **Cost-Gated Rendering**: Every paid render (still image and cinemagraph each have their own gate) is preceded by a live pre-flight cost estimate checked against a configurable `MAX_RENDER_COST_USD` ceiling before any MCP call fires.
+- **Visualization Caching**: Rendered assets are cached in LibSQL keyed on (origin, destination, status, delay bucket), so a repeat request with an unchanged traffic status reuses the cached image/video instead of re-rendering.
+- **Graceful Cinemagraph Degradation**: If the animation step times out, errors, or exceeds the cost threshold, the request still returns the still image successfully rather than failing outright.
 - **Agent-to-Agent (A2A) Protocol**: Implements JSON-RPC 2.0 compliant A2A communication for inter-agent collaboration and task delegation.
 - **Intelligent Workflows**: Automated workflows for traffic analysis.
 - **Memory & Persistence**: Agent conversation memory using LibSQL storage for context-aware interactions and conversation history.
@@ -48,8 +52,12 @@ Create a `.env` file in the root directory of the project and populate it with t
   - _Required APIs_: Enable the Routes API (v2) in your Google Cloud Console
 - `GOOGLE_GENERATIVE_AI_API_KEY`: Your Google Generative AI API key.
   - _Example_: `GOOGLE_GENERATIVE_AI_API_KEY=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXX`
+- `MAX_RENDER_COST_USD` _(optional)_: Ceiling in USD for a single pre-flight render cost estimate (still image or cinemagraph); a render is skipped if its estimate exceeds this value. Defaults to `0.05`.
+  - _Example_: `MAX_RENDER_COST_USD=0.05`
 
 **Important**: Make sure to enable the **Routes API (v2)** in your Google Cloud Console, not the legacy Distance Matrix API.
+
+**Note**: Traffic visualization connects to the public Livepeer Agent MCP endpoint (`https://agent.livepeer.org/api/mcp/creative`) — no separate API key is required, but rendering draws down a shared, rate-limited balance, so keep `MAX_RENDER_COST_USD` conservative.
 
 ## Usage
 
@@ -94,6 +102,31 @@ curl -X POST http://localhost:4111/a2a/agent/trafficAgent \
     }
   }'
 ```
+
+**Example requesting a visualization** (only triggers a Livepeer render when a visual is explicitly requested — plain traffic queries are unaffected):
+
+```bash
+curl -X POST http://localhost:4111/a2a/agent/trafficAgent \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "1",
+    "method": "generate",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [
+          {
+            "kind": "text",
+            "text": "Show me an image of the traffic from Manhattan to Brooklyn"
+          }
+        ]
+      }
+    }
+  }'
+```
+
+The agent's reply text includes `Image: <url>` (and `Video: <url>` if a cinemagraph was also generated) on their own lines.
 
 ## API Documentation
 
@@ -234,12 +267,15 @@ Access the interactive API documentation at:
 - Delay time calculations in minutes
 - Distance and duration estimates
 - Periodic traffic updates at user-defined intervals
+- On explicit request, generates an AI image (and optionally a short cinemagraph) of the traffic condition
 
 **Example Prompts**:
 
 - "What's the traffic on Third Mainland Bridge?"
 - "How long will it take to get from Manhattan to Brooklyn?"
 - "Give me traffic updates every 30 minutes for my route to the airport"
+- "Show me an image of the traffic from Times Square to Central Park"
+- "Visualize the traffic from Manchester City Centre to Manchester Airport"
 
 ## Workflows
 
@@ -260,6 +296,14 @@ Automated workflow that:
 - **API**: Google Routes API v2
 - **Features**: Traffic-aware routing, real-time delays, distance calculation
 - **Output**: Normal time, traffic time, distance, status, delay in minutes
+
+### Visualize Traffic Tool
+
+- **ID**: `visualize-traffic`
+- **API**: Livepeer Agent MCP (`https://agent.livepeer.org/api/mcp/creative`)
+- **Trigger**: Only invoked when the user explicitly asks for an image/picture/visual — never on a plain traffic query.
+- **Flow**: builds a deterministic prompt from fixed status/delay lookup tables → checks the LibSQL visualization cache → gets a live pre-flight cost estimate → renders a still image if under `MAX_RENDER_COST_USD` → optionally estimates and renders a short cinemagraph (own cost gate) from the still image → caches the result.
+- **Output**: `imageUrl`, optional `videoUrl`, `cached` flag, `estimatedCost`/`renderedCost`, and an optional `skippedReason` if a render step was skipped or the cinemagraph degraded gracefully.
 
 ## Scorers & Evaluation
 
@@ -283,7 +327,8 @@ Custom LLM-judged scorer that validates proper translation of non-English locati
 | [Mastra AI](https://mastra.ai/)                                              | AI agent framework for building and orchestrating intelligent agents |
 | [TypeScript](https://www.typescriptlang.org/)                                | Type-safe JavaScript for robust code development                     |
 | [Google Routes API](https://developers.google.com/maps/documentation/routes) | Real-time traffic and routing information                            |
-| [LibSQL](https://github.com/libsql/libsql)                                   | SQLite-compatible database for agent memory and persistence          |
+| [Livepeer Agent MCP](https://agent.livepeer.org/api/mcp/creative)            | Cost-gated AI image/cinemagraph generation of traffic conditions     |
+| [LibSQL](https://github.com/libsql/libsql)                                   | SQLite-compatible database for agent memory, visualization cache, and persistence |
 | [Axios](https://axios-http.com/)                                             | Promise-based HTTP client for API requests                           |
 | [Zod](https://zod.dev/)                                                      | TypeScript-first schema validation library                           |
 | [Pino](https://getpino.io/)                                                  | High-performance structured logging library                          |
@@ -299,7 +344,10 @@ traffic-pulse-ai-agent/
 │       ├── agents/
 │       │   └── traffic-agent.ts     # Traffic monitoring agent
 │       ├── tools/
-│       │   └── traffic-tool.ts      # Google Routes API integration
+│       │   ├── traffic-tool.ts              # Google Routes API integration
+│       │   ├── visualize-traffic-tool.ts    # Livepeer MCP image/cinemagraph tool
+│       │   ├── prompt-tables.ts             # status/delay -> prompt fragments (fixed lookup tables)
+│       │   └── visualize-traffic-cache.ts   # LibSQL cache for rendered visualizations
 │       ├── workflows/
 │       │   └── traffic-workflow.ts  # Traffic analysis workflow
 │       ├── routes/
@@ -353,6 +401,3 @@ This project is licensed under the ISC License. For more details, refer to the `
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Mastra](https://img.shields.io/badge/Mastra-0.23+-purple)](https://mastra.ai/)
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
-
-
-/a2a/agent/:agentId'
