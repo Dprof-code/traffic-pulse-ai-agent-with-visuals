@@ -10,7 +10,10 @@ let clientPromise: Promise<Client> | null = null;
 async function getClient(): Promise<Client> {
     if (!clientPromise) {
         clientPromise = (async () => {
-            const client = createClient({ url: "file:../mastra.db" });
+            const client = createClient({
+                url: process.env.TURSO_DATABASE_URL ?? "file:../mastra.db",
+                authToken: process.env.TURSO_AUTH_TOKEN,
+            });
             await client.execute(`
                 CREATE TABLE IF NOT EXISTS visualization_cache (
                     origin TEXT NOT NULL,

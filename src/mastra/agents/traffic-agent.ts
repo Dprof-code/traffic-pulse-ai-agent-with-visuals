@@ -33,7 +33,8 @@ export const trafficAgent = new Agent({
     memory: new Memory({
         storage: new LibSQLStore({
             id: "traffic-agent-memory",
-            url: "file:../mastra.db",
+            url: process.env.TURSO_DATABASE_URL ?? "file:../mastra.db",
+            authToken: process.env.TURSO_AUTH_TOKEN,
         })
     })
 });
