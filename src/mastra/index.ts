@@ -43,5 +43,7 @@ export const mastra = new Mastra({
   bundler: {
     externals: ["axios"],
   },
-  deployer: new VercelDeployer(),
+  deployer: new VercelDeployer({
+    studio: true,
+  }),
 });
