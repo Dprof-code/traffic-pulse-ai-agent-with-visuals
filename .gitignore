@@ -1,7 +1,8 @@
 output.txt 
 node_modules 
 dist 
-.mastra 
+.mastra
+.vercel
 .env.development 
 .env 
 *.db 

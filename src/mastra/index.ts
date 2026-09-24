@@ -3,6 +3,7 @@ import { Mastra } from '@mastra/core/mastra';
 import { InMemoryStore } from '@mastra/core/storage';
 import { PinoLogger } from '@mastra/loggers';
 import { Observability, MastraStorageExporter } from '@mastra/observability';
+import { VercelDeployer } from '@mastra/deployer-vercel';
 
 import { trafficAgent } from './agents/traffic-agent';
 import { a2aAgentRoute } from './routes/a2a-agent-route';
@@ -42,4 +43,5 @@ export const mastra = new Mastra({
   bundler: {
     externals: ["axios"],
   },
+  deployer: new VercelDeployer(),
 });
